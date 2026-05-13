@@ -1,0 +1,5 @@
+# Archivos de entorno y repositorio local
+.env
+env_repo/
+__pycache__/
+*.pyc
