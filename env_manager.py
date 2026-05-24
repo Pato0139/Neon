@@ -89,6 +89,104 @@ def list_versions():
         print("No hay backups")
 
 
+def deploy(destino=None):
+    """Copia el .env al proyecto Constru-trans_01 (o ruta indicada)."""
+    if not os.path.exists(ENV_FILE):
+        print("Error: No existe .env. Ejecuta primero: python env_manager.py create")
+        return
+
+    # Rutas candidatas si no se pasa una explícita
+    if destino is None:
+        candidatos = [
+            os.path.expanduser('~/Constru-trans_01'),
+            os.path.expanduser('~/Documents/Constru-trans_01'),
+            os.path.expanduser('~/Desktop/Constru-trans_01'),
+            os.path.join(os.path.dirname(BASE_DIR), 'Constru-trans_01'),
+        ]
+        destino = next((c for c in candidatos if os.path.isdir(c)), None)
+        if destino is None:
+            print("No encontré Constru-trans_01 automáticamente.")
+            print("Usa: python env_manager.py deploy <ruta-al-proyecto>")
+            return
+
+    if not os.path.isdir(destino):
+        print(f"Error: la carpeta {destino} no existe")
+        return
+
+    # Verificar que sea el proyecto correcto (debe tener manage.py)
+    if not os.path.isfile(os.path.join(destino, 'manage.py')):
+        print(f"Aviso: en {destino} no se encontró manage.py.")
+        print("¿Seguro que es la raíz del proyecto Constru-trans_01? (s/N)")
+        respuesta = input().strip().lower()
+        if respuesta != 's':
+            print("Cancelado")
+            return
+
+    destino_env = os.path.join(destino, '.env')
+    if os.path.exists(destino_env):
+        # Backup del .env existente en el destino
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_destino = os.path.join(destino, f'.env.backup_{timestamp}')
+        shutil.copy2(destino_env, backup_destino)
+        print(f"Backup del .env anterior: {backup_destino}")
+
+    shutil.copy2(ENV_FILE, destino_env)
+    print(f"✅ .env copiado a: {destino_env}")
+    print("Ya puedes iniciar Django y probar la recuperación de contraseña.")
+
+
+def test_email():
+    """Envía un correo de prueba con las credenciales del .env actual."""
+    import smtplib
+    from email.mime.text import MIMEText
+
+    if not os.path.exists(ENV_FILE):
+        print("Error: No existe .env. Ejecuta primero: python env_manager.py create")
+        return
+
+    # Leer variables del .env
+    env = {}
+    with open(ENV_FILE, encoding='utf-8') as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea or linea.startswith('#') or '=' not in linea:
+                continue
+            clave, _, valor = linea.partition('=')
+            env[clave.strip()] = valor.strip()
+
+    host = env.get('EMAIL_HOST', 'smtp.gmail.com')
+    port = int(env.get('EMAIL_PORT', 587))
+    user = env.get('EMAIL_HOST_USER')
+    password = env.get('EMAIL_HOST_PASSWORD')
+
+    if not user or not password:
+        print("Error: faltan EMAIL_HOST_USER o EMAIL_HOST_PASSWORD en el .env")
+        return
+
+    destinatario = input(f"Correo destinatario para la prueba [{user}]: ").strip() or user
+
+    mensaje = MIMEText(
+        "Este es un correo de prueba de Constru-Trans.\n"
+        "Si lo recibes, la recuperación de contraseña ya está lista.",
+        'plain', 'utf-8'
+    )
+    mensaje['Subject'] = '[Constru-Trans] Prueba de configuración de correo'
+    mensaje['From'] = env.get('DEFAULT_FROM_EMAIL', user)
+    mensaje['To'] = destinatario
+
+    print(f"Conectando a {host}:{port} como {user}...")
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.starttls()
+            smtp.login(user, password)
+            smtp.send_message(mensaje)
+        print(f"✅ Correo enviado a {destinatario}. Revisa la bandeja (y spam).")
+    except smtplib.SMTPAuthenticationError:
+        print("❌ Error de autenticación. Revisa EMAIL_HOST_PASSWORD (App Password de 16 caracteres).")
+    except Exception as exc:
+        print(f"❌ Error al enviar: {exc}")
+
+
 def show_credentials_guide():
     """Muestra una guía para obtener las credenciales"""
     print("""
@@ -124,6 +222,11 @@ Comandos:
   save <nombre>       - Guarda una versión con nombre (ej: save development)
   restore <nombre>    - Restaura una versión (ej: restore production)
   list                - Lista todas las versiones y backups
+  deploy [ruta]       - Copia el .env a Constru-trans_01 (autodetecta si no
+                        se pasa ruta). Hace backup del .env anterior.
+  test-email          - Envía un correo de prueba con las credenciales
+                        del .env (verifica que la recuperación de contraseña
+                        funcione antes de subirla al proyecto).
   guide               - Muestra guía para obtener credenciales
         """)
         return
@@ -144,6 +247,10 @@ Comandos:
         restore_version(sys.argv[2])
     elif command == 'list':
         list_versions()
+    elif command == 'deploy':
+        deploy(sys.argv[2] if len(sys.argv) == 3 else None)
+    elif command == 'test-email':
+        test_email()
     elif command == 'guide':
         show_credentials_guide()
     else:
